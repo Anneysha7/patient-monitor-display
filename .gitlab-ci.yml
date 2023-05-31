@@ -1,0 +1,211 @@
+image: brentschuetze/comp2300-microbit-test:latest
+
+stages:
+  - filecheck
+  - build
+  - capture
+  - render
+
+file:main:
+  stage: filecheck
+  tags:
+    - comp2300
+  image: brentschuetze/comp2300-arch-test:latest
+  script:
+    - python3 /scripts/validate.py exists src/main.S
+    - python3 /scripts/validate.py different src/main.S -U https://raw.githubusercontent.com/bschuetze/comp2300-2023-lab-pack-1-dev/main/a2/src/main.S
+
+build:main:
+  stage: build
+  tags:
+    - comp2300
+  allow_failure: true
+  needs:
+    - file:main
+  script:
+    - make
+
+statement-of-originality:
+  stage: filecheck
+  allow_failure: true
+  tags:
+    - comp2300
+  artifacts:
+    when: always
+    paths:
+      - references.md
+    reports:
+      dotenv: student.env
+  script:
+    - python3 /scripts/validate.py get-student statement-of-originality.md
+    - python3 /scripts/validate.py get-content statement-of-originality.md -C references.md
+    - python3 /scripts/validate.py schema ./statement-of-originality.md https://comp.anu.edu.au/courses/comp1720/assets/schemas/soo-md.json
+
+report:
+  stage: filecheck
+  allow_failure: true
+  tags:
+    - comp2300
+  script:
+    - python3 /scripts/validate.py exists report.md
+    - var="$(cat report.md | wc -w)"
+    - >
+      echo "Word Count: $var"
+    - > 
+      if (( $var > 300)); then
+          if (( $var > 1200)); then
+            echo "Your report should be < 1000 words!";
+            exit 1;
+          else
+            exit 0;
+          fi
+      else
+        echo "Your report should probably be more than 300 words!";
+        exit 1;
+      fi
+
+pdf:
+  stage: render
+  tags:
+    - comp2300
+  image: 
+    name: brentschuetze/comp2300-md2pdf:latest
+  needs:
+    - job: statement-of-originality
+      artifacts: true
+  variables:
+    PDF_NAME: '$CI_PROJECT_ROOT_NAMESPACE-$CI_PROJECT_NAME.pdf'
+  script:
+    - ls
+
+    # Create files if don't exist already
+    - touch references.md
+
+    # Check ENV Vars
+    - echo $PDF_NAME
+    - echo $STUDENT_NAME
+    - echo $STUDENT_UID
+    - echo "REFERENCES:"
+    - cat references.md
+
+    # Build pdf.md
+    ## Preamble
+    - echo "---" > pdf.md
+    - echo "pdf_options:" >> pdf.md
+    - |
+      echo "  displayHeaderFooter: true" >> pdf.md
+    - |
+      echo "  format: A4" >> pdf.md
+    - |
+      echo "  margin: 25mm" >> pdf.md
+    - |
+      echo "  printBackground: true" >> pdf.md
+    - | 
+      echo "  headerTemplate: |-" >> pdf.md
+    - echo "    <style>" >> pdf.md
+    - echo "      section {" >> pdf.md
+    - | 
+      echo "        display: block;" >> pdf.md
+    - | 
+      echo "        margin: 0 auto;" >> pdf.md
+    - | 
+      echo "        padding-left: 13mm;" >> pdf.md
+    - | 
+      echo "        padding-right: 13mm;" >> pdf.md
+    - | 
+      echo "        width: 100%;" >> pdf.md
+    - | 
+      echo "        font-size: 8px;" >> pdf.md
+    - echo "      }" >> pdf.md
+    - echo "      .lleft {" >> pdf.md
+    - | 
+      echo "        float: left;" >> pdf.md
+    - echo "      }" >> pdf.md
+    - echo "      .rright {" >> pdf.md
+    - | 
+      echo "        float: right;" >> pdf.md
+    - echo "      }" >> pdf.md
+    - echo "    </style>" >> pdf.md
+    - echo "    <section>" >> pdf.md
+    - echo '      <span class="title lleft"></span>' >> pdf.md
+    - echo '      <span class="date rright"></span>' >> pdf.md
+    - echo "    </section>" >> pdf.md
+    - | 
+      echo "  footerTemplate: |-" >> pdf.md
+    - echo "    <section>" >> pdf.md
+    - echo '      <div class="rright">' >> pdf.md
+    - echo '        <span class="pageNumber"></span>' >> pdf.md
+    - echo '        / <span class="totalPages"></span>' >> pdf.md
+    - echo "      </div>" >> pdf.md
+    - echo "    </section>" >> pdf.md
+    - echo "---" >> pdf.md
+
+    - echo "" >> pdf.md
+    - echo "# Assignment 2" >> pdf.md
+    - echo "## Student Details" >> pdf.md
+    - > 
+      echo "- **uid**: $STUDENT_UID" >> pdf.md
+    - > 
+      echo "- **name**: $STUDENT_NAME" >> pdf.md
+    - echo "" >> pdf.md
+    - echo "" >> pdf.md
+
+    ## Report
+    - echo "## Report" >> pdf.md
+    - echo "" >> pdf.md
+    - cat report.md >> pdf.md
+    - echo "" >> pdf.md
+    - echo "" >> pdf.md
+
+    ## References
+    - echo "" >> pdf.md
+    - echo "<div class='page-break'> </div>" >> pdf.md
+    - echo "" >> pdf.md
+    - cat references.md >> pdf.md
+    - echo "" >> pdf.md
+
+    ## Code:
+    - echo "" >> pdf.md
+    - echo "<div class='page-break'> </div>" >> pdf.md
+    - echo "" >> pdf.md
+    - echo "## Assignment Code" >> pdf.md
+    - echo "### main.S" >> pdf.md
+    - echo -n '`' >> pdf.md && echo -n '`' >> pdf.md && echo '`arm' >> pdf.md
+    - cat src/main.S >> pdf.md
+    - echo "" >> pdf.md
+    - echo -n '`' >> pdf.md && echo -n '`' >> pdf.md && echo '`' >> pdf.md
+    - echo "" >> pdf.md
+
+    - >
+      for source_file in src/*.S; do
+        [ -f "$source_file" ] || break
+        echo "$source_file"
+        if [ "$source_file" != "src/main.S" ]; then
+          echo "" >> pdf.md
+          echo "<div class='page-break'> </div>" >> pdf.md
+          echo "" >> pdf.md
+          echo "## Assignment Code" >> pdf.md
+          echo "### $source_file" >> pdf.md
+          echo -n '`' >> pdf.md && echo -n '`' >> pdf.md && echo '`arm' >> pdf.md
+          cat "$source_file" >> pdf.md
+          echo "" >> pdf.md
+          echo -n '`' >> pdf.md && echo -n '`' >> pdf.md && echo '`' >> pdf.md
+          echo "" >> pdf.md
+        fi
+      done
+
+
+    # Final md doc
+    - cat pdf.md
+    # Render
+    - | 
+      md-to-pdf --launch-options '{ "args": ["--no-sandbox"] }' \
+                --highlight-style 'vs2015' \
+                --document-title 'Checkpoint 2' \
+                --css 'body { font-family: helvetica }'  \
+                pdf.md
+    - mv pdf.pdf "$PDF_NAME"
+
+  artifacts:
+    paths:
+      - $PDF_NAME
